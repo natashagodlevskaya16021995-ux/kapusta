@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>mgrt</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@300;400;700&display=swap" rel="stylesheet">
+
+  <style>
+    html, body {margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;
+      background: transparent;
+      font-family: 'roboto condensed', sans-serif;}
+    #score {position:fixed; top:36px; right:38px; z-index:20; background:#fffbe7;
+      font-size:3em; border-radius:20px; color:#957805; font-weight:bold; padding:12px 46px; min-width:60px; text-align:center;}
+    #prompt {position:absolute; left:50%; top:34px; transform:translate(-50%,0); background:#fffbedf0; font-size:3em; border-radius:32px; padding:16px 46px; color:#222;font-weight:500; min-width:270px; text-align:center;}
+    #gnomeArea {position: absolute; left: 50%; top: 132px; transform: translate(-50%, 0); z-index:16; pointer-events:none; width:150px; display:flex; flex-direction:column; align-items: center;}
+    #gnomePic {width:140px; height:140px; object-fit:contain; border:none; box-shadow:none; background:none; z-index:16; display:block; user-select:none; pointer-events:none;}
+    #craneArea {position:absolute; left:0; top:0; width:100vw; height:100vh; z-index:5100; pointer-events:none;}
+    #craneSVG {position:absolute; left:0; top:0;}
+    #stonesArea {position: absolute; left:0; top:230px; width:100vw; height:calc(100vh - 260px); z-index:10002; pointer-events:auto;}
+    .stone {position:absolute; cursor:pointer; display:flex; flex-direction:column; align-items:center; user-select:none; z-index:20; box-sizing: border-box; background:none;}
+    .stone img {display:block; object-fit:contain; pointer-events:none; border-radius:0;}
+    .stone .label {position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:rgba(255,235,200,0.7); color:#422f02; font-weight: bold; font-size:2.6em; border-radius:11px; padding:2px 22px; min-width:76px; text-align:center; pointer-events:none;}
+    .stone.decor .label {display:none;}
+    .fragment {position: absolute; pointer-events: none; width:44px; height:44px; border-radius:22px; opacity: 1; will-change: transform, opacity; pointer-events: none; z-index:19500; transition: opacity .48s;}
+    #finalOverlay {position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(217,210,233,0.86); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100000; font-size:3em; font-weight: bold; color: #050505;}
+    #resetBtn {margin-top:70px; background:#7d67a1; color:#050505;font-size:.82em;font-weight:bold; border:none;border-radius:30px;padding:20px 90px;}
+    @media(max-width:700px) {
+      #prompt { font-size:0.74em; padding:8px 7vw;}
+      #score {font-size:1em;padding:4px 15px;}
+      #stonesArea {top:112px;}
+      #gnomePic {width:90px; height:90px;}
+      #gnomeArea{width:90px;}
+      .stone .label{font-size:1em;padding:0 11px;}
+    }
+  </style>
+</head>
+<body>
+<div id="score">0</div>
+<div id="prompt"></div>
+<div id="gnomeArea"><img id="gnomePic"></div>
+<div id="craneArea"><svg id="craneSVG"></svg></div>
+<div id="stonesArea"></div>
+<div id="finalOverlay" style="display:none;">
+  <div>Отличная работа!🥳</div>
+  <button id="resetBtn">Играть снова?💖</button>
+</div>
+<script>
+const GNOME_IMG = "images/GNOME.png";
+const STONES_ANSWER = [
+  {src: "images/STON.png"},
+  {src: "images/DECOR.png"}
+
+];
+const STONES_DECOR = [
+  {src: "images/STON.png"},
+  {src: "images/DECOR.png"}
+];
+const QUESTIONS = [
+  {prompt:"16 : 4 =", answers:["4", "3", "5"], correct:"4"},
+  {prompt:"24 : 4 =", answers:["6", "8", "5"], correct:"6"},
+  {prompt:"36 : 4 =", answers:["9", "8", "7"], correct:"9"},
+  {prompt:"12 : 3 =", answers:["4", "5", "3"], correct:"4"},
+  {prompt:"8 : 4 =", answers:["2", "4", "3"], correct:"2"},
+  {prompt:"28 : 4 =", answers:["7", "6", "8"], correct:"7"},
+  {prompt:"20 : 5 =", answers:["4", "2", "6"], correct:"4"},
+  {prompt:"32 : 4 =", answers:["8", "7", "9"], correct:"8"},
+  {prompt:"40 : 10 =", answers:["4", "3", "5"], correct:"4"}
+];
+const N_DECOR = 13;
+const scoreElem = document.getElementById('score');
+const promptElem = document.getElementById('prompt');
+const gnomePicElem = document.getElementById('gnomePic');
+const stonesArea = document.getElementById('stonesArea');
+const craneSVG = document.getElementById('craneSVG');
+const overlay = document.getElementById('finalOverlay');
+const resetBtn = document.getElementById('resetBtn');
+let score = 0, currentQ = 0, busy = false, isClawBusy = false, stonesData = [];
+let gnomeX = 0, gnomeY = 0, stonesAreaRect = null;
+
+function updateCoords() {
+  let gnomeRect = gnomePicElem.getBoundingClientRect();
+  gnomeX = gnomeRect.left + gnomeRect.width / 2;
+  gnomeY = gnomeRect.top + gnomeRect.height;
+  stonesAreaRect = stonesArea.getBoundingClientRect();
+}
+function startGame() {
+  score = 0; currentQ = 0; busy = false; isClawBusy = false;
+  scoreElem.textContent = score;
+  overlay.style.display = 'none';
+  gnomePicElem.src = GNOME_IMG;
+  showQuestion();
+  setTimeout(updateCoords, 80);
+}
+window.addEventListener('resize', () => {
+  setTimeout(()=>{
+    updateCoords();
+    showQuestion();
+  }, 120);
+});
+function showQuestion() {
+  updateCoords();
+  promptElem.textContent = QUESTIONS[currentQ].prompt;
+  stonesArea.innerHTML = '';
+  stonesData = [];
+  setupStones();
+  drawCraneIdle();
+}
+function setupStones() {
+  const q = QUESTIONS[currentQ];
+  let sizePool = [162, 175, 179, 148, 154, 140, 185, 168];
+  let answerStones = q.answers.map((txt,i)=> {
+    let st=STONES_ANSWER[i%STONES_ANSWER.length];
+    let sz = sizePool[Math.floor(Math.random()*sizePool.length)];
+    let rot = Math.random()*38-18, sc=0.88+Math.random()*0.13;
+    return {...st, sz, rot, sc, isAnswer:true, label:txt, correct:(txt===q.correct)};
+  });
+  let decorStones = [];
+  for(let i=0;i<N_DECOR;++i){
+    let deco = STONES_DECOR[Math.floor(Math.random()*STONES_DECOR.length)];
+    let sz = sizePool[Math.floor(Math.random()*sizePool.length)]*0.93;
+    let rot = Math.random()*280-140, sc=0.7+Math.random()*0.37;
+    decorStones.push({...deco, sz, rot, sc, isAnswer:false, label:""});
+  }
+  let pool = [...answerStones, ...decorStones];
+  pool = shuffle(pool);
+  let posUsed = [];
+  let w = stonesAreaRect.width, h = stonesAreaRect.height;
+  let clawZoneY = gnomeY+44;
+  for(let i=0;i<pool.length;++i){
+    let x=0, y=0, tries=0;
+    let rad=pool[i].sz/2+18, minClawDist = 90;
+    do{
+      x=Math.random()*(w-2*rad)+rad; y=Math.random()*(h-2*rad)+rad;
+      ++tries;
+    }while(
+      (Math.abs(x-w/2)<minClawDist && y<clawZoneY+minClawDist) ||
+      posUsed.some((p) => (Math.abs(p.x-x)<rad*1.46)&&(Math.abs(p.y-y)<rad*1.3))
+      && tries<32
+    );
+    posUsed.push({x, y});
+    const div=document.createElement('div');
+    div.className = 'stone'+ (pool[i].isAnswer?'':' decor');
+    div.style.width = div.style.height = pool[i].sz+'px';
+    div.style.left = (x-pool[i].sz/2)+'px';
+    div.style.top  = (y-pool[i].sz/2)+'px';
+    div.style.transform = `rotate(${pool[i].rot}deg) scale(${pool[i].sc})`;
+    const img = document.createElement('img');
+    img.src = pool[i].src;
+    img.style.width = img.style.height = pool[i].sz+"px";
+    img.style.transform = `rotate(${pool[i].rot}deg) scale(${pool[i].sc})`;
+    div.appendChild(img);
+    if(pool[i].isAnswer){
+      const label = document.createElement('div');
+      label.className='label'; label.textContent=pool[i].label;
+      div.appendChild(label);
+    }
+    div.onclick=()=>stoneClick(pool[i], div);
+    stonesArea.appendChild(div);
+    stonesData.push({ ...pool[i], div, x, y });
+  }
+}
+function stoneClick(stone, div){
+  if(busy || isClawBusy) return;
+  busy = true; isClawBusy = true;
+  updateCoords();
+
+  const rect = div.getBoundingClientRect();
+  const stoneCenter = {
+    x: rect.left + rect.width / 2,
+    y: rect.top  + rect.height/2
+  };
+  const gnomeCenter = { x: gnomeX, y: gnomeY };
+
+  animateCraneOnly(gnomeCenter, stoneCenter, () => {
+    moveStoneToBody(div, stoneCenter);
+    animateCraneWithStone(stoneCenter, gnomeCenter, div, rect, ()=>{
+      boomAt(gnomeCenter.x, gnomeCenter.y, stone.correct ? "gold" : "coal");
+      setTimeout(()=>{
+        div.parentNode && div.parentNode.removeChild(div);
+        if(stone.correct){
+          score++;
+          scoreElem.textContent = score;
+          if(currentQ < QUESTIONS.length-1) {
+            busy=false; isClawBusy=false; currentQ++; showQuestion();
+          } else {
+            overlay.style.display=''; busy=false; isClawBusy=false; drawCraneIdle();
+          }
+        } else {
+          busy=false; isClawBusy=false; drawCraneIdle();
+        }
+      }, 550);
+    });
+  });
+}
+
+function moveStoneToBody(stoneDiv, stoneCenter){
+  const rect = stoneDiv.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  stoneDiv.style.transform = '';
+  document.body.appendChild(stoneDiv);
+  stoneDiv.style.left = (stoneCenter.x - w/2) + "px";
+  stoneDiv.style.top  = (stoneCenter.y - h/2) + "px";
+  stoneDiv.style.width = w + "px"; stoneDiv.style.height = h + "px";
+  stoneDiv.style.zIndex = "25000";
+}
+
+function animateCraneOnly(from, to, cb){
+  const steps = 26;
+  let step = 0;
+  function anim(){
+    craneSVG.innerHTML = "";
+    let p = step/steps;
+    let xt = from.x + (to.x-from.x)*p;
+    let yt = from.y + (to.y-from.y)*p;
+    drawCraneSVG(from, {x:xt, y:yt});
+    step++;
+    if(step<=steps) setTimeout(anim, 13);
+    else setTimeout(()=>{
+      craneSVG.innerHTML = "";
+      drawCraneSVG(from, to);
+      cb && cb();
+    },40);
+  }
+  anim();
+}
+
+function animateCraneWithStone(from, to, div, stoneRect, cb) {
+  const steps = 23;
+  let step = 0;
+  const w = stoneRect.width, h = stoneRect.height;
+  function anim(){
+    craneSVG.innerHTML = "";
+    let p = step/steps;
+    let xt = from.x + (to.x-from.x)*p;
+    let yt = from.y + (to.y-from.y)*p;
+    drawCraneSVG(to, {x:xt, y:yt});
+    div.style.left = (xt - w/2) + 'px';
+    div.style.top  = (yt - h/2) + 'px';
+    step++;
+    if(step<=steps) setTimeout(anim, 12);
+    else setTimeout(()=>{
+      craneSVG.innerHTML = "";
+      drawCraneSVG(to, to);
+      cb && cb();
+    },40);
+  }
+  anim();
+}
+
+function drawCraneIdle(){
+  if(isClawBusy) return;
+  updateCoords();
+  craneSVG.innerHTML = "";
+  let from={x:gnomeX,y:gnomeY}, to={x:gnomeX,y:gnomeY+115};
+  drawCraneSVG(from, to);
+}
+function drawCraneSVG(from, to){
+  craneSVG.innerHTML = "";
+  craneSVG.setAttribute('width', window.innerWidth);
+  craneSVG.setAttribute('height', window.innerHeight);
+  let path = `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="#0f3b09" stroke-width="10" stroke-linecap="round" />
+    <ellipse cx="${from.x}" cy="${from.y+16}" rx="26" ry="16" fill="#c2ad6d" stroke="#906e2f" stroke-width="7"/>`;
+  let clawAngle = Math.atan2(to.y-from.y, to.x-from.x)-Math.PI/2;
+  path += `<g transform="translate(${to.x},${to.y}) rotate(${clawAngle*180/Math.PI})">
+    <ellipse cx="0" cy="15" rx="28" ry="18" fill="#d6b668" stroke="#655e34" stroke-width="6"/>
+    <rect x="-18" y="15" width="36" height="11" rx="6.5" fill="#c6b053"/>
+    <path d="M-18 20 Q-25 29 -37 33 Q-18 21 -18 22" fill="#b19d6a" stroke="#655e34" stroke-width="5"/>
+    <path d="M18 20 Q25 29 37 33 Q18 21 18 22" fill="#b19d6a" stroke="#655e34" stroke-width="5"/>
+  </g>`;
+  craneSVG.innerHTML = path;
+}
+
+function boomAt(x, y, type){
+  let pieces = 13+Math.floor(Math.random()*8);
+  for(let i=0;i<pieces;i++){
+    let frag = document.createElement('div');
+    frag.className = 'fragment';
+    let theta = Math.random()*2*Math.PI;
+    let r = Math.random()*60 + 24;
+    frag.style.width = frag.style.height = (24+Math.random()*24) +'px';
+    frag.style.left = (x-15+Math.cos(theta)*18) + 'px';
+    frag.style.top  = (y-15+Math.sin(theta)*9)  + 'px';
+    if(type === "gold") {
+      frag.style.background = `radial-gradient(ellipse at 50% 35%, #eee888 70%, #ffd648 100%)`;
+      frag.style.boxShadow = `0 0 16px 4px #ffcb2247`;
+    } else {
+      frag.style.background = `radial-gradient(ellipse at 20% 40%, #222c22 48%, #353535 100%)`;
+      frag.style.boxShadow = `0 0 8px 2px #222`;
+    }
+    frag.style.opacity = 1;
+    setTimeout(((f,angle,r)=>{
+      return ()=> {
+        f.style.transform = `translate(${Math.cos(angle)*r}px, ${Math.sin(angle)*(r+15)}px)
+                          scale(${1.1+Math.random()*0.7}) rotate(${Math.random()*80-40}deg)`;
+        f.style.opacity=0;
+      }
+    })(frag, theta, r), 70+Math.random()*60);
+    document.body.appendChild(frag);
+    setTimeout(()=>frag.remove(), 770+Math.random()*80);
+  }
+}
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+resetBtn.onclick = ()=>{overlay.style.display = 'none'; setTimeout(startGame,260);}
+window.onload = ()=>{setTimeout(startGame,40);}
+
+(function() {
+  const mark = "cmFkaWF0ZWFjaGVy"; 
+  const check = mark.split('').reduce((a,b)=>a+b.charCodeAt(0),0);
+})();
+
+</script>
+</body>
+</html>
